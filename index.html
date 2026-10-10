@@ -4,218 +4,330 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mini Pong Arcade</title>
+<title>NEON PONG ARCADE</title>
 <style>
 *{box-sizing:border-box}
-body{
-  margin:0;background:#080b18;color:#00f5ff;
-  font-family:monospace;text-align:center;
-  display:flex;flex-direction:column;align-items:center;
-  justify-content:center;min-height:100vh;padding:12px
-}
-h1{letter-spacing:5px;text-shadow:0 0 15px #00f5ff}
-canvas{
-  width:min(95vw,800px);height:auto;
-  border:2px solid #00f5ff;
-  box-shadow:0 0 25px #00f5ff44;
-  background:#050711;touch-action:none
-}
-p{color:#ccc;font-size:13px}
-button{
-  background:#10182c;color:#00f5ff;
-  border:1px solid #00f5ff;padding:12px 20px;
-  cursor:pointer;font-family:monospace;margin:5px
-}
+body{margin:0;padding:16px;background:#080b18;color:#00f5ff;font-family:monospace;text-align:center}
+h1{text-shadow:0 0 15px #00f5ff;letter-spacing:4px}
+main{max-width:850px;margin:auto}
+canvas{display:block;width:100%;height:auto;border:2px solid #00f5ff;background:#050711;touch-action:none}
+button,select{background:#10182c;color:#00f5ff;border:1px solid #00f5ff;padding:12px;margin:5px;font:inherit;border-radius:5px}
+button{cursor:pointer}
+.panel{padding:12px;border:1px solid #263451;margin:12px 0}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:#10182c;padding:12px}
+.stat strong{display:block;font-size:22px;margin-bottom:5px}
+#message{color:#fff;min-height:20px}
 </style>
 </head>
 <body>
-
+<main>
 <h1>NEON PONG</h1>
-<p>Joueur 1 : W / S — Joueur 2 : ↑ / ↓</p>
+<p>Solo contre l'IA ou deux joueurs</p>
+
+<div class="panel">
+<label>Mode :
+<select id="mode">
+<option value="ai">Solo contre IA</option>
+<option value="pvp">Deux joueurs</option>
+</select></label>
+<label> Difficulté :
+<select id="difficulty">
+<option value="easy">Facile</option>
+<option value="normal" selected>Normal</option>
+<option value="hard">Difficile</option>
+<option value="expert">Expert</option>
+</select></label>
+<label>Points pour gagner :
+<select id="target">
+<option>5</option><option selected>7</option><option>10</option><option>15</option>
+</select></label>
+</div>
+
+<p>
+Joueur 1 : <strong id="s1">0</strong>
+&nbsp; — &nbsp;
+<span id="name2">IA</span> : <strong id="s2">0</strong>
+</p>
 
 <canvas id="game" width="800" height="450"></canvas>
 
 <div>
-  <button id="start">JOUER</button>
-  <button id="reset">RECOMMENCER</button>
+<button id="start">▶ JOUER</button>
+<button id="pause">Ⅱ PAUSE</button>
+<button id="reset">↻ RECOMMENCER</button>
 </div>
-<p id="info">Premier à 7 points gagne !</p>
+<p id="message">Premier à 7 points gagne !</p>
+<p id="help">Mobile : glisse ton doigt sur le terrain pour déplacer ta raquette.</p>
+
+<div class="panel">
+<h3>STATISTIQUES SAUVEGARDÉES</h3>
+<div class="stats">
+<div class="stat"><strong id="games">0</strong>Parties</div>
+<div class="stat"><strong id="wins">0</strong>Victoires</div>
+<div class="stat"><strong id="losses">0</strong>Défaites</div>
+<div class="stat"><strong id="points">0</strong>Points marqués</div>
+<div class="stat"><strong id="best">0</strong>Meilleur score</div>
+<div class="stat"><strong id="rate">0%</strong>Taux de victoire</div>
+</div>
+<button id="clear">EFFACER LES STATISTIQUES</button>
+</div>
+<p>PC : W/S pour le joueur 1, ↑/↓ pour le joueur 2, espace pour pause.</p>
+</main>
 
 <script>
+(() => {
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
-const info = document.getElementById("info");
-
+const $ = id => document.getElementById(id);
 const W = canvas.width, H = canvas.height;
 const keys = {};
+const STORE = "neonPongStatsV3";
 
-let score1 = 0, score2 = 0;
-let playing = false;
-let animation;
-let ai = false;
-
-const left = {x:25,y:180,w:12,h:90,speed:6};
-const right = {x:763,y:180,w:12,h:90,speed:6};
-const ball = {x:400,y:225,r:8,vx:5,vy:3};
-
-function resetBall(direction=1){
-  ball.x=W/2;
-  ball.y=H/2;
-  ball.vx=5*direction;
-  ball.vy=(Math.random()-.5)*6;
+let stats;
+try {
+  stats = {...{games:0,wins:0,losses:0,points:0,best:0},
+    ...JSON.parse(localStorage.getItem(STORE) || "{}")};
+} catch(e) {
+  stats = {games:0,wins:0,losses:0,points:0,best:0};
 }
 
-function resetGame(){
-  score1=0;
-  score2=0;
-  left.y=180;
-  right.y=180;
-  resetBall(Math.random()<.5 ? -1 : 1);
-  playing=false;
-  info.textContent="Premier à 7 points gagne !";
+const paddleH = 85;
+const left = {x:22,y:180,w:12,h:paddleH};
+const right = {x:766,y:180,w:12,h:paddleH};
+const ball = {x:400,y:225,r:8,vx:5,vy:2};
+let score1=0, score2=0, playing=false, paused=false;
+let ended=false, raf=0, last=0, touches=new Map();
+let mode="ai", difficulty="normal", target=7;
+let recorded=false, particles=[];
+
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+
+function saveStats(){
+  try {localStorage.setItem(STORE,JSON.stringify(stats));}catch(e){}
+  renderStats();
+}
+function renderStats(){
+  $("games").textContent=stats.games;
+  $("wins").textContent=stats.wins;
+  $("losses").textContent=stats.losses;
+  $("points").textContent=stats.points;
+  $("best").textContent=stats.best;
+  $("rate").textContent=(stats.games?Math.round(stats.wins/stats.games*100):0)+"%";
+}
+function hud(){
+  $("s1").textContent=score1;
+  $("s2").textContent=score2;
+  $("name2").textContent=mode==="ai"?"IA":"Joueur 2";
+}
+function resetBall(dir){
+  ball.x=W/2;ball.y=H/2;
+  ball.vx=5*dir;
+  ball.vy=(Math.random()-.5)*4;
+}
+function reset(){
+  cancelAnimationFrame(raf);
+  mode=$("mode").value;
+  difficulty=$("difficulty").value;
+  target=Number($("target").value);
+  score1=score2=0;
+  left.y=right.y=H/2-paddleH/2;
+  playing=false;paused=false;ended=false;recorded=false;
+  touches.clear();particles=[];
+  resetBall(Math.random()<.5?-1:1);
+  $("message").textContent="Premier à "+target+" points gagne !";
+  $("pause").textContent="Ⅱ PAUSE";
+  $("help").textContent=mode==="ai"
+    ?"Mobile : glisse ton doigt sur le terrain. L'IA contrôle la raquette droite."
+    :"Mobile : glisse à gauche pour le joueur 1, à droite pour le joueur 2.";
+  hud();draw();
+}
+function start(){
+  if(ended)reset();
+  if(playing&&!paused)return;
+  playing=true;paused=false;last=0;
+  $("pause").textContent="Ⅱ PAUSE";
+  $("message").textContent="Partie en cours !";
+  cancelAnimationFrame(raf);
+  raf=requestAnimationFrame(loop);
+}
+function pause(){
+  if(ended)return;
+  if(!playing&&!paused){start();return;}
+  if(paused){start();return;}
+  playing=false;paused=true;
+  cancelAnimationFrame(raf);
+  $("pause").textContent="▶ REPRENDRE";
+  $("message").textContent="Partie en pause.";
   draw();
 }
-
-function startGame(){
-  if(score1>=7 || score2>=7) resetGame();
-  playing=true;
-  cancelAnimationFrame(animation);
-  loop();
+function finish(winner){
+  playing=false;paused=false;ended=true;
+  cancelAnimationFrame(raf);
+  if(!recorded){
+    recorded=true;
+    stats.games++;
+    if(mode==="ai"){
+      if(winner===1)stats.wins++;
+      else stats.losses++;
+    }
+    stats.points+=score1;
+    stats.best=Math.max(stats.best,score1);
+    saveStats();
+  }
+  $("message").textContent=(winner===1?"VICTOIRE DU JOUEUR 1 !":"VICTOIRE DU "+(mode==="ai"?"L'IA":"JOUEUR 2")+" !")+" Score : "+score1+" - "+score2;
+  draw();
 }
-
-document.getElementById("start").onclick=()=>{
-  ai=false;
-  startGame();
-};
-
-document.getElementById("reset").onclick=()=>{
-  resetGame();
-  startGame();
-};
-
-document.addEventListener("keydown",e=>{
-  keys[e.key.toLowerCase()]=true;
-  if(["ArrowUp","ArrowDown"," "].includes(e.key))e.preventDefault();
-  if(e.key===" "&&!playing)startGame();
-});
-
-document.addEventListener("keyup",e=>{
-  keys[e.key.toLowerCase()]=false;
-});
-
-function update(){
-  if(keys["w"])left.y-=left.speed;
-  if(keys["s"])left.y+=left.speed;
-
-  if(keys["arrowup"])right.y-=right.speed;
-  if(keys["arrowdown"])right.y+=right.speed;
-
-  left.y=Math.max(0,Math.min(H-left.h,left.y));
-  right.y=Math.max(0,Math.min(H-right.h,right.y));
-
-  ball.x+=ball.vx;
-  ball.y+=ball.vy;
-
-  if(ball.y-ball.r<0||ball.y+ball.r>H){
-    ball.vy*=-1;
+function moveAI(dt){
+  const settings={
+    easy:{speed:3,error:80},
+    normal:{speed:4.5,error:35},
+    hard:{speed:6,error:12},
+    expert:{speed:7,error:2}
+  }[difficulty]||{speed:4.5,error:35};
+  let aim=H/2;
+  if(ball.vx>0){
+    let t=Math.max(0,(right.x-ball.x)/ball.vx);
+    const period=2*H;
+    aim=((ball.y+ball.vy*t)%(period)+period)%period;
+    if(aim>H)aim=period-aim;
+    aim=clamp(aim,ball.r,H-ball.r);
+    aim+=(Math.random()-.5)*settings.error;
   }
-
-  // Collision avec les raquettes
-  if(ball.vx<0 &&
-     ball.x-ball.r<left.x+left.w &&
-     ball.x+ball.r>left.x &&
-     ball.y+ball.r>left.y &&
-     ball.y-ball.r<left.y+left.h){
-
-    ball.x=left.x+left.w+ball.r;
-    ball.vx=Math.abs(ball.vx)*1.04;
-    ball.vy+=((ball.y-(left.y+left.h/2))/left.h)*4;
-  }
-
-  if(ball.vx>0 &&
-     ball.x+ball.r>right.x &&
-     ball.x-ball.r<right.x+right.w &&
-     ball.y+ball.r>right.y &&
-     ball.y-ball.r<right.y+right.h){
-
-    ball.x=right.x-ball.r;
-    ball.vx=-Math.abs(ball.vx)*1.04;
-    ball.vy+=((ball.y-(right.y+right.h/2))/right.h)*4;
-  }
-
-  // Points
-  if(ball.x<0){
-    score2++;
-    resetBall(-1);
-  }
-
-  if(ball.x>W){
-    score1++;
-    resetBall(1);
-  }
-
-  if(score1>=7||score2>=7){
-    playing=false;
-    info.textContent=score1>=7
-      ?"VICTOIRE DU JOUEUR 1 !"
-      :"VICTOIRE DU JOUEUR 2 !";
+  right.y+=clamp(aim-(right.y+right.h/2),-settings.speed*dt,settings.speed*dt);
+}
+function burst(x,y,color){
+  for(let i=0;i<12;i++){
+    const a=Math.random()*Math.PI*2,s=Math.random()*4+1;
+    particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:25,color});
   }
 }
+function update(dt){
+  if(keys.w)left.y-=6*dt;
+  if(keys.s)left.y+=6*dt;
+  if(mode==="pvp"){
+    if(keys.arrowup)right.y-=6*dt;
+    if(keys.arrowdown)right.y+=6*dt;
+  }else moveAI(dt);
+  left.y=clamp(left.y,0,H-left.h);
+  right.y=clamp(right.y,0,H-right.h);
 
+  ball.x+=ball.vx*dt;
+  ball.y+=ball.vy*dt;
+  if(ball.y-ball.r<0){ball.y=ball.r;ball.vy=Math.abs(ball.vy);}
+  if(ball.y+ball.r>H){ball.y=H-ball.r;ball.vy=-Math.abs(ball.vy);}
+
+  function hit(p,dir,color){
+    const offset=clamp((ball.y-(p.y+p.h/2))/(p.h/2),-1,1);
+    ball.x=dir===1?p.x+p.w+ball.r:p.x-ball.r;
+    ball.vx=Math.cos(offset*1.05)*Math.min(Math.hypot(ball.vx,ball.vy)*1.04,12)*dir;
+    ball.vy=Math.sin(offset*1.05)*Math.min(Math.hypot(ball.vx,ball.vy)*1.04,12);
+    burst(ball.x,ball.y,color);
+  }
+  if(ball.vx<0&&ball.x-ball.r<left.x+left.w&&
+    ball.x+ball.r>left.x&&ball.y+ball.r>left.y&&ball.y-ball.r<left.y+left.h){
+    hit(left,1,"#00f5ff");
+  }
+  if(ball.vx>0&&ball.x+ball.r>right.x&&
+    ball.x-ball.r<right.x+right.w&&ball.y+ball.r>right.y&&ball.y-ball.r<right.y+right.h){
+    hit(right,-1,"#ff2bd6");
+  }
+  if(ball.x< -ball.r){
+    score2++;hud();resetBall(-1);
+    if(score2>=target)finish(2);
+  }
+  if(ball.x>W+ball.r){
+    score1++;hud();resetBall(1);
+    if(score1>=target)finish(1);
+  }
+  particles=particles.filter(p=>p.life>0);
+  for(const p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;}
+}
 function draw(){
   ctx.clearRect(0,0,W,H);
-
-  // Ligne centrale
-  ctx.strokeStyle="#263451";
-  ctx.setLineDash([8,10]);
-  ctx.beginPath();
-  ctx.moveTo(W/2,0);
-  ctx.lineTo(W/2,H);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Scores
-  ctx.fillStyle="#00f5ff";
-  ctx.font="bold 42px monospace";
-  ctx.textAlign="center";
-  ctx.fillText(score1,W/4,55);
-
-  ctx.fillStyle="#ff2bd6";
-  ctx.fillText(score2,3*W/4,55);
-
-  // Raquette gauche
-  ctx.shadowBlur=15;
-  ctx.shadowColor="#00f5ff";
-  ctx.fillStyle="#00f5ff";
-  ctx.fillRect(left.x,left.y,left.w,left.h);
-
-  // Raquette droite
-  ctx.shadowColor="#ff2bd6";
-  ctx.fillStyle="#ff2bd6";
+  ctx.fillStyle="#050711";ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="#263451";ctx.setLineDash([8,10]);
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();ctx.setLineDash([]);
+  ctx.textAlign="center";ctx.font="bold 44px monospace";
+  ctx.fillStyle="#00f5ff";ctx.fillText(score1,W/4,55);
+  ctx.fillStyle="#ff2bd6";ctx.fillText(score2,3*W/4,55);
+  ctx.save();ctx.shadowBlur=18;ctx.shadowColor="#00f5ff";
+  ctx.fillStyle="#00f5ff";ctx.fillRect(left.x,left.y,left.w,left.h);
+  ctx.shadowColor="#ff2bd6";ctx.fillStyle="#ff2bd6";
   ctx.fillRect(right.x,right.y,right.w,right.h);
-
-  // Balle
-  ctx.shadowColor="#ffffff";
-  ctx.shadowBlur=20;
-  ctx.fillStyle="#ffffff";
-  ctx.beginPath();
-  ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
-  ctx.fill();
-  ctx.shadowBlur=0;
-}
-
-function loop(){
-  if(!playing){
-    draw();
-    return;
+  ctx.shadowColor="#fff";ctx.shadowBlur=20;ctx.fillStyle="#fff";
+  ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+  for(const p of particles){
+    ctx.globalAlpha=clamp(p.life/25,0,1);
+    ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,3,3);
   }
-
-  update();
-  draw();
-  animation=requestAnimationFrame(loop);
+  ctx.globalAlpha=1;
+}
+function loop(time){
+  if(!playing)return;
+  if(!last)last=time;
+  const dt=clamp((time-last)/16.667,0,2);
+  last=time;
+  update(dt);draw();
+  if(playing)raf=requestAnimationFrame(loop);
 }
 
-resetGame();
+// Clavier
+document.addEventListener("keydown",e=>{
+  const k=e.key.toLowerCase();
+  if(["arrowup","arrowdown"," "].includes(k))e.preventDefault();
+  keys[k]=true;
+  if(k===" "&&!e.repeat)pause();
+});
+document.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+window.addEventListener("blur",()=>{Object.keys(keys).forEach(k=>keys[k]=false);});
+
+// Souris et écran tactile
+function pointerMove(e){
+  const rect=canvas.getBoundingClientRect();
+  const y=(e.clientY-rect.top)*H/rect.height;
+  if(!touches.has(e.pointerId)){
+    if(e.pointerType==="mouse"){
+      left.y=clamp(y-left.h/2,0,H-left.h);
+      return;
+    }
+    touches.set(e.pointerId,mode==="ai"?1:(e.clientX<rect.left+rect.width/2?1:2));
+  }
+  const owner=touches.get(e.pointerId);
+  const p=owner===1?left:right;
+  p.y=clamp(y-p.h/2,0,H-p.h);
+}
+canvas.addEventListener("pointerdown",e=>{
+  e.preventDefault();
+  try{canvas.setPointerCapture(e.pointerId);}catch(_){}
+  pointerMove(e);
+});
+canvas.addEventListener("pointermove",e=>{
+  if(e.pointerType==="mouse"&&e.buttons===0)return;
+  if(e.pointerType!=="mouse"||e.buttons)pointerMove(e);
+});
+["pointerup","pointercancel","lostpointercapture"].forEach(type=>
+  canvas.addEventListener(type,e=>touches.delete(e.pointerId))
+);
+canvas.addEventListener("contextmenu",e=>e.preventDefault());
+
+$("start").onclick=start;
+$("pause").onclick=pause;
+$("reset").onclick=reset;
+$("mode").onchange=reset;
+$("difficulty").onchange=()=>{difficulty=$("difficulty").value;};
+$("target").onchange=()=>{target=Number($("target").value);};
+$("clear").onclick=()=>{
+  if(confirm("Effacer toutes les statistiques ?")){
+    stats={games:0,wins:0,losses:0,points:0,best:0};
+    saveStats();
+  }
+};
+renderStats();reset();
+})();
 </script>
 </body>
 </html>
+
+
