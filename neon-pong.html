@@ -1,0 +1,221 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini Pong Arcade</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;background:#080b18;color:#00f5ff;
+  font-family:monospace;text-align:center;
+  display:flex;flex-direction:column;align-items:center;
+  justify-content:center;min-height:100vh;padding:12px
+}
+h1{letter-spacing:5px;text-shadow:0 0 15px #00f5ff}
+canvas{
+  width:min(95vw,800px);height:auto;
+  border:2px solid #00f5ff;
+  box-shadow:0 0 25px #00f5ff44;
+  background:#050711;touch-action:none
+}
+p{color:#ccc;font-size:13px}
+button{
+  background:#10182c;color:#00f5ff;
+  border:1px solid #00f5ff;padding:12px 20px;
+  cursor:pointer;font-family:monospace;margin:5px
+}
+</style>
+</head>
+<body>
+
+<h1>NEON PONG</h1>
+<p>Joueur 1 : W / S — Joueur 2 : ↑ / ↓</p>
+
+<canvas id="game" width="800" height="450"></canvas>
+
+<div>
+  <button id="start">JOUER</button>
+  <button id="reset">RECOMMENCER</button>
+</div>
+<p id="info">Premier à 7 points gagne !</p>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const info = document.getElementById("info");
+
+const W = canvas.width, H = canvas.height;
+const keys = {};
+
+let score1 = 0, score2 = 0;
+let playing = false;
+let animation;
+let ai = false;
+
+const left = {x:25,y:180,w:12,h:90,speed:6};
+const right = {x:763,y:180,w:12,h:90,speed:6};
+const ball = {x:400,y:225,r:8,vx:5,vy:3};
+
+function resetBall(direction=1){
+  ball.x=W/2;
+  ball.y=H/2;
+  ball.vx=5*direction;
+  ball.vy=(Math.random()-.5)*6;
+}
+
+function resetGame(){
+  score1=0;
+  score2=0;
+  left.y=180;
+  right.y=180;
+  resetBall(Math.random()<.5 ? -1 : 1);
+  playing=false;
+  info.textContent="Premier à 7 points gagne !";
+  draw();
+}
+
+function startGame(){
+  if(score1>=7 || score2>=7) resetGame();
+  playing=true;
+  cancelAnimationFrame(animation);
+  loop();
+}
+
+document.getElementById("start").onclick=()=>{
+  ai=false;
+  startGame();
+};
+
+document.getElementById("reset").onclick=()=>{
+  resetGame();
+  startGame();
+};
+
+document.addEventListener("keydown",e=>{
+  keys[e.key.toLowerCase()]=true;
+  if(["ArrowUp","ArrowDown"," "].includes(e.key))e.preventDefault();
+  if(e.key===" "&&!playing)startGame();
+});
+
+document.addEventListener("keyup",e=>{
+  keys[e.key.toLowerCase()]=false;
+});
+
+function update(){
+  if(keys["w"])left.y-=left.speed;
+  if(keys["s"])left.y+=left.speed;
+
+  if(keys["arrowup"])right.y-=right.speed;
+  if(keys["arrowdown"])right.y+=right.speed;
+
+  left.y=Math.max(0,Math.min(H-left.h,left.y));
+  right.y=Math.max(0,Math.min(H-right.h,right.y));
+
+  ball.x+=ball.vx;
+  ball.y+=ball.vy;
+
+  if(ball.y-ball.r<0||ball.y+ball.r>H){
+    ball.vy*=-1;
+  }
+
+  // Collision avec les raquettes
+  if(ball.vx<0 &&
+     ball.x-ball.r<left.x+left.w &&
+     ball.x+ball.r>left.x &&
+     ball.y+ball.r>left.y &&
+     ball.y-ball.r<left.y+left.h){
+
+    ball.x=left.x+left.w+ball.r;
+    ball.vx=Math.abs(ball.vx)*1.04;
+    ball.vy+=((ball.y-(left.y+left.h/2))/left.h)*4;
+  }
+
+  if(ball.vx>0 &&
+     ball.x+ball.r>right.x &&
+     ball.x-ball.r<right.x+right.w &&
+     ball.y+ball.r>right.y &&
+     ball.y-ball.r<right.y+right.h){
+
+    ball.x=right.x-ball.r;
+    ball.vx=-Math.abs(ball.vx)*1.04;
+    ball.vy+=((ball.y-(right.y+right.h/2))/right.h)*4;
+  }
+
+  // Points
+  if(ball.x<0){
+    score2++;
+    resetBall(-1);
+  }
+
+  if(ball.x>W){
+    score1++;
+    resetBall(1);
+  }
+
+  if(score1>=7||score2>=7){
+    playing=false;
+    info.textContent=score1>=7
+      ?"VICTOIRE DU JOUEUR 1 !"
+      :"VICTOIRE DU JOUEUR 2 !";
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+
+  // Ligne centrale
+  ctx.strokeStyle="#263451";
+  ctx.setLineDash([8,10]);
+  ctx.beginPath();
+  ctx.moveTo(W/2,0);
+  ctx.lineTo(W/2,H);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Scores
+  ctx.fillStyle="#00f5ff";
+  ctx.font="bold 42px monospace";
+  ctx.textAlign="center";
+  ctx.fillText(score1,W/4,55);
+
+  ctx.fillStyle="#ff2bd6";
+  ctx.fillText(score2,3*W/4,55);
+
+  // Raquette gauche
+  ctx.shadowBlur=15;
+  ctx.shadowColor="#00f5ff";
+  ctx.fillStyle="#00f5ff";
+  ctx.fillRect(left.x,left.y,left.w,left.h);
+
+  // Raquette droite
+  ctx.shadowColor="#ff2bd6";
+  ctx.fillStyle="#ff2bd6";
+  ctx.fillRect(right.x,right.y,right.w,right.h);
+
+  // Balle
+  ctx.shadowColor="#ffffff";
+  ctx.shadowBlur=20;
+  ctx.fillStyle="#ffffff";
+  ctx.beginPath();
+  ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur=0;
+}
+
+function loop(){
+  if(!playing){
+    draw();
+    return;
+  }
+
+  update();
+  draw();
+  animation=requestAnimationFrame(loop);
+}
+
+resetGame();
+</script>
+</body>
+</html>
